@@ -13,7 +13,7 @@ BUFFER_LENGTH = 30
 # threshold for navigation vs stopping
 THRESHOLD = 1.5
 
-invideofile = "/Users/phoetrymaster/Hyperlayer/hyperflow/subj8.avi"
+invideofile = "/Users/phoetrymaster/Hyperlayer/hyperflow/IMG_0067.MOV"
 outdir = "/Users/phoetrymaster/Hyperlayer/hyperflow/"
 
 filename, ext = os.path.splitext(os.path.basename(invideofile))
@@ -28,8 +28,8 @@ frame_height = cap.get(4)
 frame_width = cap.get(3)
 
 fourcc = cv2.cv.CV_FOURCC(*'mp4v')
-print(fourcc, cv_fourcc_code, frame_height, frame_width)
-writer = cv2.VideoWriter(outvideofile, fourcc, 30, (int(frame_width), int(frame_height)), True)
+print(fourcc, cv_fourcc_code, frame_height, frame_width, frame_rate)
+writer = cv2.VideoWriter(outvideofile, fourcc, frame_rate, (int(frame_width), int(frame_height)), True)
 
 try:
     # params for ShiTomasi corner detection
@@ -165,8 +165,8 @@ try:
 
           #move window
           cv2.moveWindow('img', 0, 0)
-          cv2.moveWindow('vectorField', 2 * int(frame_width), 0)
-          cv2.moveWindow('plot', 0, int(frame_height))
+          cv2.moveWindow('vectorField', 500, 0)
+          cv2.moveWindow('plot', 0, 400)
 
           # Now update the previous frame and previous points
           old_gray = frame_gray.copy()
