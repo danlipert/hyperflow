@@ -1,3 +1,4 @@
+import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -11,8 +12,22 @@ BUFFER_LENGTH = 30
 # threshold for navigation vs stopping
 THRESHOLD = 1.5
 
-cap = cv2.VideoCapture("/home/dan/hyperlayer/opticalflow/IMG_0067.MOV")
+invideofile = "/Users/phoetrymaster/Hyperlayer/hyperflow/IMG_0067.MOV"
+
+filename, ext = os.path.splitext(os.path.basename(invideofile))
+outvideofile = os.path.join(os.path.dirname(invideofile), filename + "_processed" + ext)
+
+cap = cv2.VideoCapture(invideofile)
 #cap = cv2.VideoCapture("169.254.220.174/mjpg/video.mjpg")
+
+cv_fourcc_code = cap.get(6) 
+frame_rate = cap.get(5)
+frame_height = cap.get(4)
+frame_width = cap.get(3)
+
+fourcc = cv2.cv.CV_FOURCC(*'FMP4')
+print(fourcc, cv_fourcc_code)
+writer = cv2.VideoWriter(outvideofile, fourcc, int(frame_rate), (int(frame_width), int(frame_height)))
 
 # params for ShiTomasi corner detection
 feature_params = dict( maxCorners = 100,
@@ -60,6 +75,7 @@ while(1):
     for i in range(frameSkip):
         ret,frame = cap.read()
 
+
     #clear vector visualization
     vectorField = np.zeros_like(old_frame)
     plot = np.zeros_like(old_frame)
@@ -67,99 +83,104 @@ while(1):
     #store vector magnitudes
     magnitudes = []
     
-    ret,frame = cap.read()  
+    ret, frame = cap.read()  
     
-    frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if ret==True:
 
-    # calculate optical flow
-    p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
+        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # Select good points
-    good_new = p1[st==1]
-    good_old = p0[st==1]
+        # calculate optical flow
+        p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
+
+        # Select good points
+        good_new = p1[st==1]
+        good_old = p0[st==1]
     
-    # check if features should be recalculated
-    if len(good_new) < 5:
-        old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
-        p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
-        #when redrawing throw away old features
-        p1 = p0
-        continue
+        # check if features should be recalculated
+        if len(good_new) < 5:
+            old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
+            p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
+            #when redrawing throw away old features
+            p1 = p0
+            continue
         
-    # draw the tracks
-    '''
-    for i,(new,old) in enumerate(zip(good_new,good_old)):
-        a,b = new.ravel()
-        c,d = old.ravel()
-        cv2.line(mask, (a,b),(c,d), color[i].tolist(), 2)
-        cv2.circle(frame,(a,b),5,(0,0,255),-1)
-        #draw vector field
-        cv2.circle(vectorField,(c,d),1,(0,255,0),-1)
-        cv2.line(vectorField, (a,b), (c,d), (0,255,0), 1)
+        # draw the tracks
+        '''
+        for i,(new,old) in enumerate(zip(good_new,good_old)):
+            a,b = new.ravel()
+            c,d = old.ravel()
+            cv2.line(mask, (a,b),(c,d), color[i].tolist(), 2)
+            cv2.circle(frame,(a,b),5,(0,0,255),-1)
+            #draw vector field
+            cv2.circle(vectorField,(c,d),1,(0,255,0),-1)
+            cv2.line(vectorField, (a,b), (c,d), (0,255,0), 1)
     
-    img = cv2.add(frame,mask)
-    '''
+         img = cv2.add(frame,mask)
+         '''
     
-    for i,(new,old) in enumerate(zip(good_new, good_old)):
-        a,b = new.ravel()
-        c,d = old.ravel()
+        for i,(new,old) in enumerate(zip(good_new, good_old)):
+            a,b = new.ravel()
+            c,d = old.ravel()
         
-        #draw vector field
-        cv2.circle(vectorField,(c,d),1,(0,255,0),-1)
-        cv2.line(vectorField, (a,b), (c,d), (0,255,0), 1)
+            #draw vector field
+            cv2.circle(vectorField,(c,d),1,(0,255,0),-1)
+            cv2.line(vectorField, (a,b), (c,d), (0,255,0), 1)
         
-        #add data to calculate variance
-        mag = np.sqrt((a-c) ** 2 + (b-d) ** 2)
-        magnitudes.append(mag)
+            #add data to calculate variance
+            mag = np.sqrt((a-c) ** 2 + (b-d) ** 2)
+            magnitudes.append(mag)
     
-    width = 300
-    for index, eachVariance in enumerate(varianceBuffer):
-        cv2.circle(plot, (index, int(eachVariance)), 1, (50,50,255), -1)
+        width = 300
+        for index, eachVariance in enumerate(varianceBuffer):
+            cv2.circle(plot, (index, int(eachVariance)), 1, (50,50,255), -1)
     
-    variance = np.var(magnitudes)
-    cv2.putText(vectorField, 'magnitude variance: %s' % variance, (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+        variance = np.var(magnitudes)
+        cv2.putText(vectorField, 'magnitude variance: %s' % variance, (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
     
-    if len(varianceBuffer) > BUFFER_LENGTH:
-        varianceMean = np.mean(varianceBuffer[-BUFFER_LENGTH:])
-        #if variance > 1 and varianceMean > 1:
-        if varianceMean > THRESHOLD:
-            cv2.putText(vectorField, 'navigating', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
-        #elif variance < 1 and varianceMean < 1:
-        elif varianceMean < THRESHOLD:
-            cv2.putText(vectorField, 'stopped', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
+        if len(varianceBuffer) > BUFFER_LENGTH:
+            varianceMean = np.mean(varianceBuffer[-BUFFER_LENGTH:])
+            #if variance > 1 and varianceMean > 1:
+            if varianceMean > THRESHOLD:
+                cv2.putText(vectorField, 'navigating', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+            #elif variance < 1 and varianceMean < 1:
+            elif varianceMean < THRESHOLD:
+                cv2.putText(vectorField, 'stopped', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
+            else:
+                cv2.putText(vectorField, 'thinking...', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255)) 
         else:
-            cv2.putText(vectorField, 'thinking...', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255)) 
+            if variance > 1:
+                cv2.putText(vectorField, 'navigating', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+            else:
+                cv2.putText(vectorField, 'stopped', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
+    
+        varianceBuffer.append(variance)        
+        img = frame
+        cv2.imshow('img',img)
+        cv2.imshow('vectorField', vectorField)
+        writer.write(vectorField)
+        cv2.imshow('plot', plot)
+    
+        #move window
+        cv2.moveWindow('img', 0, 0)
+        cv2.moveWindow('vectorField', 500, 0)
+        cv2.moveWindow('plot', 0, 400)
+    
+        # Now update the previous frame and previous points
+        old_gray = frame_gray.copy()
+        p0 = good_new.reshape(-1,1,2)
+        '''
+        # check if features should be recalculated
+        if len(good_new) < 5:
+            old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
+            p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
+            #when redrawing throw away old features
+            p1 = p0
+        '''
+        if cv2.waitKey(25) == 27:
+            break
     else:
-        if variance > 1:
-            cv2.putText(vectorField, 'navigating', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
-        else:
-            cv2.putText(vectorField, 'stopped', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
-    
-    varianceBuffer.append(variance)        
-    img = frame
-    cv2.imshow('img',img)
-    cv2.imshow('vectorField', vectorField)
-    cv2.imshow('plot', plot)
-    
-    #move window
-    cv2.moveWindow('img', 0, 0)
-    cv2.moveWindow('vectorField', 500, 0)
-    cv2.moveWindow('plot', 0, 400)
-    
-    # Now update the previous frame and previous points
-    old_gray = frame_gray.copy()
-    p0 = good_new.reshape(-1,1,2)
-    '''
-    # check if features should be recalculated
-    if len(good_new) < 5:
-        old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
-        p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
-        #when redrawing throw away old features
-        p1 = p0
-    '''
-    if cv2.waitKey(25) == 27:
         break
 
 cv2.destroyAllWindows()
 cap.release()
-
+writer.release()
