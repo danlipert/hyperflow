@@ -5,15 +5,44 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import matplotlib.animation as animation
+from collections import deque
+
+
+class FrameQueue(deque):
+    def __init__(self, maxlen=10):
+        self.maxlength = maxlen
+
+    def full(self):
+        if len(self) == self.maxlength:
+            full = True
+        else:
+            full = False
+        return full
+
+    def addFrame(self, frame):
+        if self.full():
+            self.popleft()
+        self.append(frame)
+
+    def newest(self):
+        return self[len(self) - 1]
+
 
 # statics
 # length of buffer for smoothing
-BUFFER_LENGTH = 30
+BUFFER_LENGTH = 15
 
 # threshold for navigation vs stopping
-THRESHOLD = 1.5
+THRESHOLD = 0.8
+LOOKING_THRESHOLD = 4
 
-invideofile = "/Users/phoetrymaster/Hyperlayer/hyperflow/IMG_0067.MOV"
+# maximum number of corners to detect
+MAX_FEATURES = 100
+
+# option to display images to screen
+DISPLAY = False
+
+invideofile = "/Users/phoetrymaster/Hyperlayer/hyperflow/IMG_2898.MOV"
 outdir = "/Users/phoetrymaster/Hyperlayer/hyperflow/"
 
 filename, ext = os.path.splitext(os.path.basename(invideofile))
@@ -33,7 +62,7 @@ writer = cv2.VideoWriter(outvideofile, fourcc, frame_rate, (int(frame_width), in
 
 try:
     # params for ShiTomasi corner detection
-    feature_params = dict( maxCorners = 100,
+    feature_params = dict( maxCorners = MAX_FEATURES,
                          qualityLevel = 0.3,
                          minDistance = 7,
                          blockSize = 7 )
@@ -65,30 +94,36 @@ try:
     frameSkip = 0
 
     #setup histogram
-    histogram = np.zeros(50, dtype = np.float32)
+    histogram = np.zeros(MAX_FEATURES, dtype = np.float32)
 
     #variance buffer
     varianceBuffer = []
+    movementBuffer = []
 
     #for rendering plot
     plot = np.zeros_like(old_frame)
 
+    framecount = 0
+
     while(1):
-      #frameskip
-      for i in range(frameSkip):
+        framecount += 1
+        print("Processed {0}\r seconds".format((framecount * (1 / frame_rate)))),
+        newFeatures = False
+        #frameskip
+        for i in range(frameSkip):
           ret,frame = cap.read()
 
 
-      #clear vector visualization
-      vectorField = np.zeros_like(old_frame)
-      plot = np.zeros_like(old_frame)
+        #clear vector visualization
+        vectorField = np.zeros_like(old_frame)
+        plot = np.zeros_like(old_frame)
 
-      #store vector magnitudes
-      magnitudes = []
+        #store vector magnitudes
+        magnitudes = []
 
-      ret, frame = cap.read()
+        ret, frame = cap.read()
 
-      if ret==True:
+        if ret==True:
 
           frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -100,11 +135,16 @@ try:
           good_old = p0[st==1]
 
           # check if features should be recalculated
-          if len(good_new) < 5:
+          if len(good_new) < 25:
               old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
               p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
+              # calculate optical flow
+              p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
               #when redrawing throw away old features
-              p1 = p0
+              #p1 = p0
+              #newFeatures = True
+              good_new = p1[st==1]
+              good_old = p0[st==1]
               continue
 
           # draw the tracks
@@ -121,6 +161,8 @@ try:
            img = cv2.add(frame,mask)
            '''
 
+          histogramLeftRight = np.zeros(50, dtype = np.float32)
+          histogramUpDown    = np.zeros(50, dtype = np.float32)
           for i,(new,old) in enumerate(zip(good_new, good_old)):
               a,b = new.ravel()
               c,d = old.ravel()
@@ -133,6 +175,9 @@ try:
               mag = np.sqrt((a-c) ** 2 + (b-d) ** 2)
               magnitudes.append(mag)
 
+              #calculate direction of feature movement
+              histogram[i] = a - c
+
           width = 300
           for index, eachVariance in enumerate(varianceBuffer):
               cv2.circle(plot, (index, int(eachVariance)), 1, (50,50,255), -1)
@@ -140,33 +185,57 @@ try:
           variance = np.var(magnitudes)
           cv2.putText(vectorField, 'magnitude variance: %s' % variance, (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
 
+          if newFeatures is False:
+              movement = np.mean(histogram)
+              cv2.putText(vectorField, 'movement: %s' % movement, (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+          else:
+              movement = 0
+              cv2.putText(vectorField, 'movement: Recalculating...', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+
           if len(varianceBuffer) > BUFFER_LENGTH:
               varianceMean = np.mean(varianceBuffer[-BUFFER_LENGTH:])
+              movementMean = np.mean(movementBuffer[-BUFFER_LENGTH:])
               #if variance > 1 and varianceMean > 1:
               if varianceMean > THRESHOLD:
-                  cv2.putText(vectorField, 'navigating', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+                  cv2.putText(vectorField, 'navigating', (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+              #elif varianceMean > THRESHOLD and movementMean > LOOKING_THRESHOLD:
+                  #cv2.putText(vectorField, 'looking', (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
               #elif variance < 1 and varianceMean < 1:
-              elif varianceMean < THRESHOLD:
-                  cv2.putText(vectorField, 'stopped', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
+              elif varianceMean < THRESHOLD and abs(movementMean) < LOOKING_THRESHOLD:
+                  cv2.putText(vectorField, 'stopped', (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
+              elif varianceMean < THRESHOLD and abs(movementMean) > LOOKING_THRESHOLD:
+                  cv2.putText(vectorField, 'looking', (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
               else:
-                  cv2.putText(vectorField, 'thinking...', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255))
+                  cv2.putText(vectorField, 'thinking...', (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255))
           else:
               if variance > 1:
-                  cv2.putText(vectorField, 'navigating', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+                  cv2.putText(vectorField, 'navigating', (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
               else:
-                  cv2.putText(vectorField, 'stopped', (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
+                  cv2.putText(vectorField, 'stopped', (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0))
 
+          # append values to buffers
           varianceBuffer.append(variance)
-          img = frame
-          cv2.imshow('img',img)
-          cv2.imshow('vectorField', vectorField)
-          writer.write(vectorField)
-          cv2.imshow('plot', plot)
+          movementBuffer.append(movement)
 
-          #move window
-          cv2.moveWindow('img', 0, 0)
-          cv2.moveWindow('vectorField', 500, 0)
-          cv2.moveWindow('plot', 0, 400)
+          # write frame to output
+          writer.write(vectorField)
+
+          if DISPLAY:
+              img = frame
+              # display to screen
+              cv2.imshow('img',img)
+              cv2.imshow('vectorField', vectorField)
+              cv2.imshow('plot', plot)
+
+              #move window
+              cv2.moveWindow('img', 0, 0)
+              cv2.moveWindow('vectorField', 500, 0)
+              cv2.moveWindow('plot', 0, 400)
+
+              #resize window
+              #cv2.resizeWindow('img', 500, int(frame_width / 500 * frame_height))
+              #cv2.resizeWindow('vectorField', 500, int(frame_width / 500 * frame_height))
+              #cv2.resizeWindow('plot', 500, int(frame_width / 500 * frame_height))
 
           # Now update the previous frame and previous points
           old_gray = frame_gray.copy()
@@ -181,7 +250,7 @@ try:
           '''
           if cv2.waitKey(25) == 27:
               break
-      else:
+        else:
           break
 except Exception as e:
     import traceback
