@@ -6,8 +6,10 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 import matplotlib.animation as animation
 from collections import deque
+from datetime import timedelta
 
 
+# this was an idea, but somewhere along the path of implementation I forgot what it was. I'm leaving this in case I remember...
 class FrameQueue(deque):
     def __init__(self, maxlen=10):
         self.maxlength = maxlen
@@ -34,15 +36,22 @@ BUFFER_LENGTH = 15
 
 # threshold for navigation vs stopping
 THRESHOLD = 0.8
-LOOKING_THRESHOLD = 4
+LOOKING_THRESHOLD = 2
 
-# maximum number of corners to detect
+# number of corners to detect
 MAX_FEATURES = 100
+MIN_FEATURES = 5
+RECALC_PERCENTAGE = 0.25
 
 # option to display images to screen
 DISPLAY = False
 
-invideofile = "/Users/phoetrymaster/Hyperlayer/hyperflow/IMG_2898.MOV"
+# window names
+VIDEO_WINDOW = 'img'
+VECTOR_WINDOW = 'vectorField'
+PLOT_WINDOW = 'plot'
+
+invideofile = "/Users/phoetrymaster/Hyperlayer/hyperflow/IMG_2899.MOV"
 outdir = "/Users/phoetrymaster/Hyperlayer/hyperflow/"
 
 filename, ext = os.path.splitext(os.path.basename(invideofile))
@@ -55,12 +64,31 @@ cv_fourcc_code = cap.get(6)
 frame_rate = cap.get(5)
 frame_height = cap.get(4)
 frame_width = cap.get(3)
+video_length = timedelta(seconds=(cap.get(7) * (1 / frame_rate)))
 
 fourcc = cv2.cv.CV_FOURCC(*'mp4v')
 print(fourcc, cv_fourcc_code, frame_height, frame_width, frame_rate)
 writer = cv2.VideoWriter(outvideofile, fourcc, frame_rate, (int(frame_width), int(frame_height)), True)
 
+# try is to allow finally statement at end to always close files properly
 try:
+    # create windows if display is selected
+    if DISPLAY:
+        # create windows
+        cv2.namedWindow(VIDEO_WINDOW, flags=cv2.WINDOW_NORMAL)
+        cv2.namedWindow(VECTOR_WINDOW, flags=cv2.WINDOW_NORMAL)
+        cv2.namedWindow(PLOT_WINDOW, flags=cv2.WINDOW_NORMAL)
+
+        # move windows
+        cv2.moveWindow(VIDEO_WINDOW, 0, 0)
+        cv2.moveWindow(VECTOR_WINDOW, 500, 0)
+        cv2.moveWindow(PLOT_WINDOW, 0, 400)
+
+        #resize window
+        cv2.resizeWindow(VIDEO_WINDOW, 500, int(frame_width / 500 * frame_height))
+        cv2.resizeWindow(VECTOR_WINDOW, 500, int(frame_width / 500 * frame_height))
+        cv2.resizeWindow(PLOT_WINDOW, 500, int(frame_width / 500 * frame_height))
+
     # params for ShiTomasi corner detection
     feature_params = dict( maxCorners = MAX_FEATURES,
                          qualityLevel = 0.3,
@@ -103,11 +131,10 @@ try:
     #for rendering plot
     plot = np.zeros_like(old_frame)
 
-    framecount = 0
-
     while(1):
-        framecount += 1
-        print("Processed {0}\r seconds".format((framecount * (1 / frame_rate)))),
+        timestamp = timedelta(seconds=(cap.get(0) / 1000))
+        sys.stdout.write("Processed {0} of {1}\r".format(timestamp, video_length))
+        sys.stdout.flush()
         newFeatures = False
         #frameskip
         for i in range(frameSkip):
@@ -135,7 +162,7 @@ try:
           good_old = p0[st==1]
 
           # check if features should be recalculated
-          if len(good_new) < 25:
+          if len(good_new) < MIN_FEATURES or len(good_new) < (RECALC_PERCENTAGE * len(p1)):
               old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
               p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
               # calculate optical flow
@@ -223,19 +250,9 @@ try:
           if DISPLAY:
               img = frame
               # display to screen
-              cv2.imshow('img',img)
-              cv2.imshow('vectorField', vectorField)
-              cv2.imshow('plot', plot)
-
-              #move window
-              cv2.moveWindow('img', 0, 0)
-              cv2.moveWindow('vectorField', 500, 0)
-              cv2.moveWindow('plot', 0, 400)
-
-              #resize window
-              #cv2.resizeWindow('img', 500, int(frame_width / 500 * frame_height))
-              #cv2.resizeWindow('vectorField', 500, int(frame_width / 500 * frame_height))
-              #cv2.resizeWindow('plot', 500, int(frame_width / 500 * frame_height))
+              cv2.imshow(VIDEO_WINDOW,img)
+              cv2.imshow(VECTOR_WINDOW, vectorField)
+              cv2.imshow(PLOT_WINDOW, plot)
 
           # Now update the previous frame and previous points
           old_gray = frame_gray.copy()
