@@ -2,9 +2,7 @@ import os
 import sys
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 import scipy.stats as stats
-import matplotlib.animation as animation
 from collections import deque
 from datetime import timedelta
 
@@ -44,15 +42,15 @@ MIN_FEATURES = 5
 RECALC_PERCENTAGE = 0.25
 
 # option to display images to screen
-DISPLAY = False
+DISPLAY = True
 
 # window names
 VIDEO_WINDOW = 'img'
 VECTOR_WINDOW = 'vectorField'
 PLOT_WINDOW = 'plot'
 
-invideofile = "/Users/phoetrymaster/Hyperlayer/hyperflow/IMG_2899.MOV"
-outdir = "/Users/phoetrymaster/Hyperlayer/hyperflow/"
+invideofile = "./IMG_0067.MOV"
+outdir = "./"
 
 filename, ext = os.path.splitext(os.path.basename(invideofile))
 outvideofile = os.path.join(os.path.dirname(invideofile), filename + "_processed.mov")
@@ -172,6 +170,9 @@ try:
               #newFeatures = True
               good_new = p1[st==1]
               good_old = p0[st==1]
+              old_frame = frame.copy()
+              cv2.imshow(VIDEO_WINDOW,frame)
+              cv2.waitKey(25)
               continue
 
           # draw the tracks
@@ -256,6 +257,7 @@ try:
 
           # Now update the previous frame and previous points
           old_gray = frame_gray.copy()
+          old_frame = frame.copy()
           p0 = good_new.reshape(-1,1,2)
           '''
           # check if features should be recalculated
