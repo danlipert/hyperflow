@@ -6,6 +6,12 @@ import scipy.stats as stats
 from collections import deque
 from datetime import timedelta
 import datetime as dt
+import warnings
+
+warnings.filterwarnings('error')
+
+class NoFeatures(Exception):
+    pass
 
 # this was an idea, but somewhere along the path of implementation I forgot what it was. I'm leaving this in case I remember...
 class FrameQueue(deque):
@@ -56,14 +62,14 @@ def setup_display_windows():
     cv2.resizeWindow(VECTOR_WINDOW, 500, int(frame_width / 500 * frame_height))
     cv2.resizeWindow(PLOT_WINDOW, 500, int(frame_width / 500 * frame_height))
 
-def draw_text_overlay(vectorField, varianceBuffer, movementBuffer, variance, histogram, newFeatures=False):
+def draw_text_overlay(vectorField, varianceBuffer, movementBuffer, variance, movement, histogram, newFeatures=False):
     '''
     draws text overlay on vector field window
     '''
 
     if len(varianceBuffer) > BUFFER_LENGTH:
-        varianceMean = np.mean(varianceBuffer[-BUFFER_LENGTH:])
-        movementMean = np.mean(movementBuffer[-BUFFER_LENGTH:])
+        varianceMean = np.nanmean(varianceBuffer[-BUFFER_LENGTH:])
+        movementMean = np.nanmean(movementBuffer[-BUFFER_LENGTH:])
         #if variance > 1 and varianceMean > 1:
         if varianceMean > THRESHOLD:
             cv2.putText(vectorField, 'navigating', (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
@@ -81,7 +87,7 @@ def draw_text_overlay(vectorField, varianceBuffer, movementBuffer, variance, his
 
     cv2.putText(vectorField, 'magnitude variance: %s' % variance, (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
 
-    if newFeatures is False:
+    if True:#newFeatures is False:
         cv2.putText(vectorField, 'movement: %s' % movement, (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
     else:
         movement = 0
@@ -93,15 +99,31 @@ def update_windows(frame, vectorField, plot):
     cv2.imshow(VECTOR_WINDOW, vectorField)
     cv2.imshow(PLOT_WINDOW, plot)
 
-def recalculate_new_features(old_frame, feature_params, lk_params, frame, p0, p1, good_new, good_old):
-    old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
-    p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
+def find_features(old_frames, feature_params):
+    features = None
+    iterations = 1
+    while (features is None or features.size < MIN_FEATURES):
+        old_Frame = old_frames[-iterations]
+        old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
+        features = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
+        iterations += 1
+        if iterations > len(old_frames):
+            raise NoFeatures("Could not find sufficient features in last {0} frames.".format(iterations))
+    return (old_gray, features, iterations)
+
+
+def recalculate_new_features(old_frames, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old, old_gray):
+    #old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
+    #p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
     # calculate optical flow
     p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
     #when redrawing throw away old features
     #p1 = p0
     #newFeatures = True
-    good_new = p1[st==1]
+    if not p1 is None:
+        good_new = p1[st==1]
+    else:
+        good_new = []
     good_old = p0[st==1]
     return (p0, p1, good_new, good_old)
 
@@ -116,7 +138,7 @@ LOOKING_THRESHOLD = 2
 
 # number of corners to detect
 MAX_FEATURES = 100
-MIN_FEATURES = 10
+MIN_FEATURES = 5
 RECALC_PERCENTAGE = 0.25
 
 # option to display images to screen
@@ -127,7 +149,7 @@ VIDEO_WINDOW = 'img'
 VECTOR_WINDOW = 'vectorField'
 PLOT_WINDOW = 'plot'
 
-invideofile = "./coevid720.mp4"
+invideofile = "./IMG_0067.MOV"
 outdir = "./"
 
 filename, ext = os.path.splitext(os.path.basename(invideofile))
@@ -163,6 +185,9 @@ try:
 
     # Take first frame and find corners in it
     ret, old_frame = cap.read()
+
+    old_frames = FrameQueue()
+    old_frames.addFrame(old_frame)
 
     old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
     p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
@@ -204,77 +229,121 @@ try:
         ret, frame = cap.read()
 
         if ret==True:
+            try:
+                iterations = 1
+                frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-          frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                if p0 is None:
+                    p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
+                    varianceBuffer.append(np.nan)
+                    movementBuffer.append(np.nan)
+                    continue
+                else:
+                    # calculate optical flow
+                    p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
 
-          # calculate optical flow
-          p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
+                # Select good points
+                if not p1 is None:
+                    good_new = p1[st==1]
+                else:
+                    good_new = []
 
-          # Select good points
-          good_new = p1[st==1]
-          good_old = p0[st==1]
 
-          # check if features should be recalculated
-          #if len(good_new) < MIN_FEATURES or len(good_new) < (RECALC_PERCENTAGE * len(p1)):
-          if len(good_new) < MIN_FEATURES:
-              try:
-                  p0, p1, good_new, good_old = recalculate_new_features(old_frame, feature_params, lk_params, frame, p0, p1, good_new, good_old)
-                  old_frame = frame.copy()
-                  cv2.imshow(VIDEO_WINDOW,frame)
-                  cv2.waitKey(25)
-                  #skip to next frame
-                  print 'recreated features... skipping to next frame - %s' % dt.datetime.now()
-              except Exception as e:
-                  print e
-                  pass
-              continue
+                # check if features should be recalculated
+                #if len(good_new) < MIN_FEATURES or len(good_new) < (RECALC_PERCENTAGE * len(p1)):
 
-          histogramLeftRight = np.zeros(50, dtype = np.float32)
-          histogramUpDown    = np.zeros(50, dtype = np.float32)
+                # if len(good_new) < MIN_FEATURES:
+                #     p0, p1, good_new, good_old = recalculate_new_features(old_frames, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old)
+                #     #old_frame = frame.copy()
+                #     #cv2.imshow(VIDEO_WINDOW,frame)
+                #     #cv2.waitKey(25)
+                #     #skip to next frame
+                #     print 'recreated features... skipping to next frame - %s' % dt.datetime.now()
+                #
+                #     #continue
 
-          for i,(new,old) in enumerate(zip(good_new, good_old)):
-              a,b = new.ravel()
-              c,d = old.ravel()
+                if len(good_new) < MIN_FEATURES:
+                    try:
+                        old_gray, p0, iterations = find_features(old_frames, feature_params)
+                        print("Found {0} features in {1} iteration(s)".format(p0.size, iterations + 1))
+                        p0, p1, good_new, good_old = recalculate_new_features(old_frames, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old, old_gray)
+                        # if iterations > 1:
+                        #     old_frame = frame.copy()
+                        #     old_frames.addFrame(frame.copy())
+                        #     cv2.imshow(VIDEO_WINDOW,frame)
+                        #     p0 = good_new.reshape(-1,1,2)
+                        #     cv2.waitKey(25)
+                        #     #skip to next frame
+                        #     print 'recreated features... skipping to next frame - %s' % dt.datetime.now()
+                        #     continue
+                    except Exception as e:
+                        print e
 
-              #draw vector field
-              cv2.circle(vectorField,(c,d),1,(0,255,0),-1)
-              cv2.line(vectorField, (a,b), (c,d), (0,255,0), 1)
+                histogramLeftRight = np.zeros(50, dtype = np.float32)
+                histogramUpDown    = np.zeros(50, dtype = np.float32)
 
-              #add data to calculate variance
-              mag = np.sqrt((a-c) ** 2 + (b-d) ** 2)
-              magnitudes.append(mag)
+                good_old = p0[st==1]
 
-              #calculate direction of feature movement
-              histogram[i] = a - c
+                for i,(new,old) in enumerate(zip(good_new, good_old)):
+                    a,b = new.ravel()
+                    c,d = old.ravel()
 
-          width = 300
-          for index, eachVariance in enumerate(varianceBuffer):
-              cv2.circle(plot, (index, int(eachVariance)), 1, (50,50,255), -1)
+                    #draw vector field
+                    cv2.circle(vectorField,(c,d),1,(0,255,0),-1)
+                    cv2.line(vectorField, (a,b), (c,d), (0,255,0), 1)
+                    cv2.circle(vectorField, (a,b), 1, (0, 0, 255), -1)
 
-          variance = np.var(magnitudes)
-          movement = np.mean(histogram)
+                    #add data to calculate variance
+                    mag = np.sqrt((a-c) ** 2 + (b-d) ** 2)
+                    magnitudes.append(mag)
 
-          draw_text_overlay(vectorField, varianceBuffer, movementBuffer, variance, movement, histogram)
+                    #calculate direction of feature movement
+                    histogram[i] = a - c
 
-          # append values to buffers
-          varianceBuffer.append(variance)
-          movementBuffer.append(movement)
+                width = 300
+                for index, eachVariance in enumerate(varianceBuffer):
+                    if not eachVariance is np.nan:
+                        cv2.circle(plot, (index, int(eachVariance)), 1, (50,50,255), -1)
 
-          # write frame to output
-          writer.write(vectorField)
+                variance = np.var(magnitudes) / iterations
+                movement = np.mean(histogram) / iterations
 
-          if DISPLAY:
-              update_windows(frame, vectorField, plot)
+                draw_text_overlay(vectorField, varianceBuffer, movementBuffer, variance, movement, histogram)
 
-          # Now update the previous frame and previous points
-          old_gray = frame_gray.copy()
-          old_frame = frame.copy()
-          p0 = good_new.reshape(-1,1,2)
+                # append values to buffers
+                for i in range(iterations):
+                    varianceBuffer.append(variance)
+                    movementBuffer.append(movement)
 
-          if cv2.waitKey(25) == 27:
-              break
+                # write frame to output
+                writer.write(vectorField)
+
+                if DISPLAY:
+                    update_windows(frame, vectorField, plot)
+
+            except NoFeatures as e:
+                print e
+            except Exception as e:
+                import traceback
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                print e
+                traceback.print_exception(exc_type, exc_value, exc_traceback, limit=2, file=sys.stdout)
+
+            # Now update the previous frame and previous points
+            old_gray = frame_gray.copy()
+            old_frame = frame.copy()
+            old_frames.addFrame(old_frame)
+
+            try:
+                p0 = good_new.reshape(-1,1,2)
+            except:
+                p0 = None
+
+
+            if cv2.waitKey(25) == 27:
+                break
         else:
-          break
+            break
 except Exception as e:
     import traceback
     exc_type, exc_value, exc_traceback = sys.exc_info()
