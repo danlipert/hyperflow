@@ -13,26 +13,6 @@ warnings.filterwarnings('error')
 class NoFeatures(Exception):
     pass
 
-# this was an idea, but somewhere along the path of implementation I forgot what it was. I'm leaving this in case I remember...
-class FrameQueue(deque):
-    def __init__(self, maxlen=10):
-        self.maxlength = maxlen
-
-    def full(self):
-        if len(self) == self.maxlength:
-            full = True
-        else:
-            full = False
-        return full
-
-    def addFrame(self, frame):
-        if self.full():
-            self.popleft()
-        self.append(frame)
-
-    def newest(self):
-        return self[len(self) - 1]
-
 def extract_capture_metadata(cap):
     '''
     extracts metadata on framerate, resolution, codec, and length from opencv video capture object
@@ -87,7 +67,7 @@ def draw_text_overlay(vectorField, varianceBuffer, movementBuffer, variance, mov
 
     cv2.putText(vectorField, 'magnitude variance: %s' % variance, (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
 
-    if True:#newFeatures is False:
+    if newFeatures is False:
         cv2.putText(vectorField, 'movement: %s' % movement, (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
     else:
         movement = 0
@@ -99,20 +79,20 @@ def update_windows(frame, vectorField, plot):
     cv2.imshow(VECTOR_WINDOW, vectorField)
     cv2.imshow(PLOT_WINDOW, plot)
 
-def find_features(old_frames, feature_params):
+def find_features(framequeue, feature_params):
     features = None
     iterations = 1
-    while (features is None or features.size < MIN_FEATURES):
-        old_Frame = old_frames[-iterations]
+    while (features is None or len(features) <= MIN_FEATURES):
+        old_frame = framequeue[-iterations]
         old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
         features = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
         iterations += 1
-        if iterations > len(old_frames):
-            raise NoFeatures("Could not find sufficient features in last {0} frames.".format(iterations))
-    return (old_gray, features, iterations)
+        if iterations > len(framequeue):
+            raise NoFeatures("Could not find sufficient features in last {0} frames.".format(iterations - 1))
+    return (old_gray, features, iterations - 1)
 
 
-def recalculate_new_features(old_frames, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old, old_gray):
+def recalculate_new_features(framequeue, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old, old_gray):
     #old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
     #p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
     # calculate optical flow
@@ -131,6 +111,7 @@ def recalculate_new_features(old_frames, feature_params, lk_params, frame_gray, 
 # statics
 # length of buffer for smoothing
 BUFFER_LENGTH = 30
+FRAME_QUEUE_LENGTH = 10
 
 # threshold for navigation vs stopping
 THRESHOLD = 0.8
@@ -138,7 +119,7 @@ LOOKING_THRESHOLD = 2
 
 # number of corners to detect
 MAX_FEATURES = 100
-MIN_FEATURES = 5
+MIN_FEATURES = 10
 RECALC_PERCENTAGE = 0.25
 
 # option to display images to screen
@@ -149,7 +130,7 @@ VIDEO_WINDOW = 'img'
 VECTOR_WINDOW = 'vectorField'
 PLOT_WINDOW = 'plot'
 
-invideofile = "./IMG_0067.MOV"
+invideofile = "./IMG_0066.MOV"
 outdir = "./"
 
 filename, ext = os.path.splitext(os.path.basename(invideofile))
@@ -186,8 +167,8 @@ try:
     # Take first frame and find corners in it
     ret, old_frame = cap.read()
 
-    old_frames = FrameQueue()
-    old_frames.addFrame(old_frame)
+    framequeue = deque(maxlen=FRAME_QUEUE_LENGTH)
+    framequeue.append(old_frame)
 
     old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
     p0 = cv2.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
@@ -253,7 +234,7 @@ try:
                 #if len(good_new) < MIN_FEATURES or len(good_new) < (RECALC_PERCENTAGE * len(p1)):
 
                 # if len(good_new) < MIN_FEATURES:
-                #     p0, p1, good_new, good_old = recalculate_new_features(old_frames, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old)
+                #     p0, p1, good_new, good_old = recalculate_new_features(framequeue, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old)
                 #     #old_frame = frame.copy()
                 #     #cv2.imshow(VIDEO_WINDOW,frame)
                 #     #cv2.waitKey(25)
@@ -264,12 +245,13 @@ try:
 
                 if len(good_new) < MIN_FEATURES:
                     try:
-                        old_gray, p0, iterations = find_features(old_frames, feature_params)
-                        print("Found {0} features in {1} iteration(s)".format(p0.size, iterations + 1))
-                        p0, p1, good_new, good_old = recalculate_new_features(old_frames, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old, old_gray)
+                        old_gray, p0, iterations = find_features(framequeue, feature_params)
+                        print("Found {0} features in {1} iteration(s)".format(len(p0), iterations + 1))
+                        p0, p1, good_new, good_old = recalculate_new_features(framequeue, feature_params, lk_params, frame_gray, p0, p1, good_new, good_old, old_gray)
+
                         # if iterations > 1:
                         #     old_frame = frame.copy()
-                        #     old_frames.addFrame(frame.copy())
+                        #     framequeue.append(frame.copy())
                         #     cv2.imshow(VIDEO_WINDOW,frame)
                         #     p0 = good_new.reshape(-1,1,2)
                         #     cv2.waitKey(25)
@@ -332,7 +314,7 @@ try:
             # Now update the previous frame and previous points
             old_gray = frame_gray.copy()
             old_frame = frame.copy()
-            old_frames.addFrame(old_frame)
+            framequeue.append(old_frame)
 
             try:
                 p0 = good_new.reshape(-1,1,2)
