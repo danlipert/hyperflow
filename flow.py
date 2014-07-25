@@ -56,14 +56,13 @@ def draw_text_overlay(vectorField,
 
     if varianceLRmean > HIGH_VARIANCE_LR or varianceUDmean > HIGH_VARIANCE_UD:
         cv2.putText(vectorField, 'navigating', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
-    elif (varianceLRmean < MEDIUM_VARIANCE_LR or varianceUDmean < MEDIUM_VARIANCE_UD) and (movementLRmean > MEDIUM_MOVING_LR or movementUDmean > MEDIUM_MOVING_UD):
-        if movementUDmean < LOW_MOVING_UD:
-            cv2.putText(vectorField, 'rotating', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
-        else:
+    elif varianceLRmean > LOW_VARIANCE_LR and abs(movementLRmean) > MEDIUM_MOVING_LR and abs(movementUDmean) < LOW_MOVING_UD:
+        cv2.putText(vectorField, 'rotating', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+    elif varianceLRmean < MEDIUM_VARIANCE_LR and (abs(movementLRmean) > LOW_MOVING_LR or abs(movementUDmean) > LOW_MOVING_UD):
             cv2.putText(vectorField, 'looking', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
     else:
         cv2.putText(vectorField, 'stopped', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
-    cv2.waitKey(200)
+    #cv2.waitKey(200)
 
 def update_windows(frame, vectorField, plot):
     # display to screen
@@ -110,23 +109,23 @@ LINES_FROM_TOP = 50
 LINES_FROM_BOTTOM = 0
 
 # length of buffer for smoothing
-BUFFER_LENGTH = 10
+BUFFER_LENGTH = 30
 FRAME_QUEUE_LENGTH = 10
 
 # thresholds for navigation vs stopping
 # variance thresholds
-LOW_VARIANCE_THRESHOLD    = 1
-MEDIUM_VARIANCE_THRESHOLD = 5
-HIGH_VARIANCE_THRESHOLD   = 10
+LOW_VARIANCE_THRESHOLD    = 0.25
+MEDIUM_VARIANCE_THRESHOLD = 0.5
+HIGH_VARIANCE_THRESHOLD   = 1
 
 # movement thresholds
-LOW_MOVING_THRESHOLD    = 1
-MEDIUM_MOVING_THRESHOLD = 5
-HIGH_MOVING_THRESHOLD   = 10
+LOW_MOVING_THRESHOLD    = 0.25
+MEDIUM_MOVING_THRESHOLD = 0.5
+HIGH_MOVING_THRESHOLD   = 1
 
 # number of corners to detect
 MAX_FEATURES = 100
-MIN_FEATURES = 20
+MIN_FEATURES = 10
 RECALC_PERCENTAGE = 0.6
 
 # option to display images to screen
@@ -137,8 +136,8 @@ VIDEO_WINDOW = 'img'
 VECTOR_WINDOW = 'vectorField'
 PLOT_WINDOW = 'plot'
 
-invideofile = "./IMG_0067.MOV"
-#invideofile = "./subj8.avi"
+#invideofile = "./IMG_0067.MOV"
+invideofile = "./subj8.avi"
 outdir = "./"
 
 filename, ext = os.path.splitext(os.path.basename(invideofile))
@@ -325,14 +324,23 @@ try:
                     #magnitudes.append(mag)
 
                     #calculate direction of feature movement
-                    magnitudesLeftRight.append(a - c)
-                    magnitudesUpDown.append(b -d)
+                    magnitudesLeftRight.append((a - c) / FRAME_WIDTH)
+                    magnitudesUpDown.append((b - d) / FRAME_HEIGHT)
 
                 #variance = np.var(magnitudes) / iterations
-                movementLeftRight = np.mean(magnitudesLeftRight) / FRAME_WIDTH / iterations
-                movementUpDown    = np.mean(magnitudesUpDown) / FRAME_HEIGHT / iterations
-                varianceLeftRight = np.var(magnitudesLeftRight) / FRAME_WIDTH / iterations
-                varianceUpDown    = np.var(magnitudesUpDown) / FRAME_WIDTH / iterations
+                movementLeftRight = np.mean(magnitudesLeftRight) / iterations
+                movementUpDown    = np.mean(magnitudesUpDown)  / iterations
+                varianceLeftRight = np.var(magnitudesLeftRight) / iterations
+                varianceUpDown    = np.var(magnitudesUpDown) / iterations
+
+                if movementLeftRight >= 1:
+                    print("movementLeftRight greater than 1: {0}".format(movementLeftRight))
+                if movementUpDown >= 1:
+                    print("movementUpDown greater than 1: {0}".format(movementUpDown))
+                if varianceLeftRight >= 1:
+                    print("varianceLeftRight greater than 1: {0}".format(varianceLeftRight))
+                if varianceUpDown >= 1:
+                    print("varianceUpDown greater than 1: {0}".format(varianceUpDown))
 
                 # append values to buffers
                 for i in range(iterations):
