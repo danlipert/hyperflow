@@ -7,12 +7,33 @@ from collections import deque
 from datetime import timedelta
 import datetime as dt
 import warnings
+import morphology
+import matplotlib.pyplot as pyplot
+#from matplotlib import plot, draw, show
 
 warnings.filterwarnings('error')
 
 class NoFeatures(Exception):
     pass
 
+def drawPieChart(states):
+    #ion()
+    label_counts = []
+    label_list = list(set(states))
+    for label in label_list:
+        label_counts.append(float(states.count(label))/float(len(states)))
+    pyplot.axis("equal")
+    pyplot.pie(
+            label_counts,
+            labels=label_list,
+            autopct="%1.1f%%"
+    )
+    pyplot.title("Shopper Time Spend")
+
+    pyplot.show(block=False)
+    pyplot.draw()
+    pyplot.clf()
+    
 def extract_capture_metadata(cap):
     '''
     extracts metadata on framerate, resolution, codec, and length from opencv video capture object
@@ -33,13 +54,13 @@ def setup_display_windows():
     cv2.namedWindow(PLOT_WINDOW, flags=cv2.WINDOW_NORMAL)
 
     # move windows
-    cv2.moveWindow(VIDEO_WINDOW, 0, 0)
-    cv2.moveWindow(VECTOR_WINDOW, 500, 0)
+    cv2.moveWindow(VIDEO_WINDOW, 0, 20)
+    cv2.moveWindow(VECTOR_WINDOW, 500, 20)
     cv2.moveWindow(PLOT_WINDOW, 0, 400)
 
     #resize window
-    cv2.resizeWindow(VIDEO_WINDOW, 500, int(FRAME_WIDTH / 500 * FRAME_HEIGHT))
-    cv2.resizeWindow(VECTOR_WINDOW, 500, int(FRAME_WIDTH / 500 * FRAME_HEIGHT))
+    cv2.resizeWindow(VIDEO_WINDOW, 800, int(FRAME_WIDTH / 800 * FRAME_HEIGHT))
+    cv2.resizeWindow(VECTOR_WINDOW, 800, int(FRAME_WIDTH / 800 * FRAME_HEIGHT))
     cv2.resizeWindow(PLOT_WINDOW, 500, int(FRAME_WIDTH / 500 * FRAME_HEIGHT))
 
 def draw_text_overlay(vectorField,
@@ -49,19 +70,24 @@ def draw_text_overlay(vectorField,
     draws text overlay on vector field window
     '''
 
-    cv2.putText(vectorField, 'variance L-R: %s, %s' % (varianceLR, varianceLRmean), (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
-    cv2.putText(vectorField, 'movement L-R: %s, %s' % (movementLR, movementLRmean), (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
-    cv2.putText(vectorField, 'variance U-D: %s, %s' % (varianceUD, varianceUDmean), (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
-    cv2.putText(vectorField, 'movement U-D: %s, %s' % (movementUD, movementUDmean), (0,80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
-
+    #cv2.putText(vectorField, 'variance L-R: %s, %s' % (varianceLR, varianceLRmean), (0,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+    #cv2.putText(vectorField, 'movement L-R: %s, %s' % (movementLR, movementLRmean), (0,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+    #cv2.putText(vectorField, 'variance U-D: %s, %s' % (varianceUD, varianceUDmean), (0,60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+    #cv2.putText(vectorField, 'movement U-D: %s, %s' % (movementUD, movementUDmean), (0,80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+    
+    currentState = None
+    
     if varianceLRmean > HIGH_VARIANCE_LR or varianceUDmean > HIGH_VARIANCE_UD:
-        cv2.putText(vectorField, 'navigating', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+        currentState = 'navigating'
     elif varianceLRmean > LOW_VARIANCE_LR and abs(movementLRmean) > MEDIUM_MOVING_LR and abs(movementUDmean) < LOW_MOVING_UD:
-        cv2.putText(vectorField, 'rotating', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+        currentState = 'rotating'
     elif varianceLRmean < MEDIUM_VARIANCE_LR and (abs(movementLRmean) > LOW_MOVING_LR or abs(movementUDmean) > LOW_MOVING_UD):
-            cv2.putText(vectorField, 'looking', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+        currentState = 'looking'
     else:
-        cv2.putText(vectorField, 'stopped', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+        currentState = 'stopped'
+    
+    cv2.putText(vectorField, currentState, (0,50), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0,225,0), 3)
+    states.append(currentState)
     #cv2.waitKey(200)
 
 def update_windows(frame, vectorField, plot):
@@ -137,7 +163,7 @@ VECTOR_WINDOW = 'vectorField'
 PLOT_WINDOW = 'plot'
 
 #invideofile = "./IMG_0067.MOV"
-invideofile = "./subj8.avi"
+invideofile = "./videos/subj8.avi"
 outdir = "./"
 
 filename, ext = os.path.splitext(os.path.basename(invideofile))
@@ -169,12 +195,27 @@ print("UD Variance Low: {0}, Med: {1}, High: {2}".format(LOW_VARIANCE_UD, MEDIUM
 print("LR Moving   Low: {0}, Med: {1}, High: {2}".format(LOW_MOVING_LR, MEDIUM_MOVING_LR, HIGH_MOVING_LR))
 print("UD Moving   Low: {0}, Med: {1}, High: {2}".format(LOW_MOVING_UD, MEDIUM_MOVING_UD, HIGH_MOVING_UD))
 
+
+
 #mp4v works pretty well on wide variety of installs of opencv and ffmpeg
 #mpeg-4 video
 fourcc = cv2.cv.CV_FOURCC(*'mp4v')
-
+#test writer
+'''
+writer = cv2.VideoWriter('test.mov', fourcc, FRAME_RATE, (int(FRAME_WIDTH), int(FRAME_HEIGHT)), True)
+ret, example_frame = cap.read()
+test_frame = np.zeros_like(example_frame)
+cv2.putText(test_frame, 'TEST', (0,100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,225,0))
+for i in range(0,100):
+    writer.write(test_frame)
+writer.release()
+exit()
+'''
 print(fourcc, cv_fourcc_code, FRAME_HEIGHT, FRAME_WIDTH, FRAME_RATE)
-writer = cv2.VideoWriter(outvideofile, fourcc, FRAME_RATE, (int(FRAME_WIDTH), int(FRAME_HEIGHT)), True)
+writer = cv2.VideoWriter('testing.mov', fourcc, FRAME_RATE, (int(FRAME_WIDTH), int(FRAME_HEIGHT)), True)
+
+#hold shopper state for each frame
+states = []
 
 # try is to allow finally statement at end to always close files properly
 try:
@@ -397,8 +438,17 @@ try:
             except:
                 p0 = None
 
+            #update every n frames
+            if len(states) % 10 == 0:
+                drawPieChart(states)
 
             if cv2.waitKey(25) == 27:
+                #filter output list
+                outputList = morphology.erode(states)
+                outFile = open('flowoutput.csv', 'w')
+                for i, eachState in enumerate(outputList):
+                    outFile.write("%s, %s\n" % (i, eachState))
+                outFile.close()
                 break
         else:
             break
@@ -410,4 +460,7 @@ except Exception as e:
 finally:
     cv2.destroyAllWindows()
     cap.release()
+    print 'releasing writer'
     writer.release()
+    print 'writer released'
+    exit()
